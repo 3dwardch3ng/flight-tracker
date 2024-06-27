@@ -22,3 +22,17 @@ RUN dpkg-buildpackage -b -uc \
     && dpkg -i ../mlat-client_*.deb
 
 WORKDIR /installation
+
+# Install rtl-sdr
+# If you already have some other drivers installed, purge them from your system as below:
+RUN apt purge ^librtlsdr -y \
+    && rm -rvf /usr/lib/librtlsdr* /usr/include/rtl-sdr* /usr/local/lib/librtlsdr* \
+    /usr/local/include/rtl-sdr* /usr/local/include/rtl_* /usr/local/bin/rtl_* \
+# see ref: https://www.rtl-sdr.com/tag/install-guide/
+RUN pwd
+ADD rtl-sdr-blog/ rtl-sdr-blog/
+RUN echo 'blacklist dvb_usb_rtl28xxu' | tee --append /etc/modprobe.d/blacklist-dvb_usb_rtl28xxu.conf
+WORKDIR /installation/rtl-sdr-blog
+RUN mkdir -p /etc/udev/rules.d && cp rtl-sdr.rules /etc/udev/rules.d/
+RUN cmake . -DINSTALL_UDEV_RULES=ON && make && make install
+RUN ldconfig
