@@ -1,6 +1,7 @@
 FROM debian:latest AS builder
 
-ARG RB_SHARING_KEY=a1bacf5c88d5c02f5a7125f0d1d3cc43
+ARG RB_SHARING_KEY
+ARG PI_AWARE_UNIQUE_IDENTIFIER
 
 USER root
 
@@ -44,6 +45,9 @@ WORKDIR /installation
 # Install rbfeeder
 ADD ./inst_rbfeeder.sh ./
 RUN bash ./inst_rbfeeder.sh -y
+
+# Install piaware for Flight Aware
+RUN apt install piaware -y
 
 # Clean up apt cache
 RUN rm -rf /var/lib/apt/lists/*
