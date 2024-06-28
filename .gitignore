@@ -1,3 +1,5 @@
-.idea/
-mlat-client/
-rtl-sdr-blog/
+/.idea/
+/setup/mlat-client/
+/setup/rtl-sdr-blog/
+/setup/*.*
+/config/
