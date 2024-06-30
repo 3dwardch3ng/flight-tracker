@@ -280,7 +280,6 @@ enable_and_start_planespotters_service() {
     }
   else
     echo -e "Missing /etc/planespotters/feedclient or /etc/planespotters/uuid, please check the Planespotters.net configuration."
-  }
   fi
 }
 
@@ -333,17 +332,16 @@ enable_and_start_planespotters_feed_service() {
     }
   else
     echo -e "Missing /etc/planespotters/feedclient or /etc/planespotters/uuid, please check the Planespotters.net configuration."
-  }
   fi
 }
 
 # Make sure all services have been installed
-RUN systemctl list-units 'adsbexchange-*' 'dump1090-*' 'fr24feed*' 'pfclient*' 'piaware*' \
+systemctl list-units 'adsbexchange-*' 'dump1090-*' 'fr24feed*' 'pfclient*' 'piaware*' \
     'planespotters*' 'rbfeeder*' 'dump978-*' 'mlat*'
 
 enable_and_start_dump1090_fa_service
 
-if [[ SRV_MLAT_CLIENT]] then
+if [[ SRV_MLAT_CLIENT ]] then
   enable_and_start_mlat_client_service
 fi
 
@@ -416,3 +414,5 @@ if [[ $SRV_PLANESPOTTERS ]] then
 
   enable_and_start_planespotters_service
 fi
+
+su - flight-tracker
