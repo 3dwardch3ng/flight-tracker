@@ -1,0 +1,202 @@
+setup_uuid() {
+  # Check our own UUID file
+  if [ -f $uuid_file ]; then
+    uuid=$(cat ${uuid_file})
+    uuid_valid=$(check_uuid $uuid)
+    if [[ $uuid_valid == "ok" ]]; then
+      echo "UUID ($uuid) already set up in $uuid_file"
+      return
+    else
+      echo "UUID ($uuid) in $uuid_file is invalid, removing"
+      rm $uuid_file
+    fi
+  fi
+
+  # Check if UUID might have been set from ADSBx image/feeder
+  sourceFiles=(/boot/adsbx-uuid /usr/local/share/adsbexchange/adsbx-uuid)
+
+  for ((i=0; i<${#sourceFiles[@]}; i++)); do
+    if [ -f "${sourceFiles[$i]}" ]; then
+      uuid=$(cat ${sourceFiles[$i]})
+      uuid_valid=$(check_uuid $uuid)
+      if [[ $uuid_valid == "ok" ]]; then
+        echo "Using existing UUID ($uuid) from ${sourceFiles[$i]}"
+        echo $uuid > $uuid_file
+        return
+      fi
+    fi
+  done
+
+  # No UUID found, create one
+  uuid=$(cat /proc/sys/kernel/random/uuid)
+  echo "Created new UUID ($uuid) and stored in $uuid_file"
+  touch $uuid_file
+  echo $uuid > $uuid_file
+}
+
+check_uuid() {
+  if [[ $1 =~ ^\{?[A-F0-9a-f]{8}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-[A-F0-9a-f]{12}\}?$ ]] && ! [[ $1 =~ ^\{?[A-F0-9a-f]{8}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-0000-000000000000\}?$ ]];
+  then
+    echo "ok"
+  else
+    echo "invalid"
+  fi
+}
+
+get_data_source() {
+  config_input="127.0.0.1:30005"
+  config_input_type="dump1090"
+
+  if [[ $(hostname) == "radarcape" ]] || pgrep rcd &>/dev/null; then
+    config_input="127.0.0.1:10003"
+    config_input_type="radarcape_gps"
+  fi
+}
+
+check_data_source() {
+  nc=$(which nc)
+
+  if [[ -z $nc ]]; then
+      return
+  fi
+
+  get_data_source
+
+  input_ip=$(echo $config_input | cut -d: -f1)
+  input_port=$(echo $config_input | cut -d: -f2)
+
+  if ! "$nc" -z "$input_ip" "$input_port"; then
+    check_data_source_fr24
+    sleep 10
+  fi
+
+  if ! "$nc" -z "$input_ip" "$input_port"; then
+    echo "No default data source found. You may need to install dump1090 first or configure input yourself."
+    return
+  fi
+
+  echo "Default data source configured"
+}
+
+check_data_source_fr24() {
+  fr24feed_ini="/etc/fr24feed.ini"
+  if ! [ -f "$fr24feed_ini" ]; then
+    return
+  fi
+
+  echo "FR24 feeder detected"
+
+  if grep -q procargs "$fr24feed_ini"; then
+    procargs=`grep procargs $fr24feed_ini | cut -d'=' -f2 | tr -d '"'`
+
+    if ! [[ $procargs == *"--net"* ]]; then
+      echo "Found FR24 feeder missing --net flag"
+      echo "Attempting to fix it"
+      procargs+=" --net"
+      sed -i "s/procargs=.*/procargs=\"$procargs\"/" "$fr24feed_ini"
+      if [[ systemctl is-active fr24feed &>/dev/null ]]; then
+        echo "Updated FR24 feeder config - restarting"
+        systemctl restart fr24feed
+      fi
+    fi
+
+    return
+  fi
+
+  echo "Found FR24 feeder missing procargs config"
+  echo "procargs=\"--net\"" >> "$fr24feed_ini"
+
+  if [[ systemctl is-active fr24feed &>/dev/null ]]; then
+    echo "Updated FR24 feeder config - restarting"
+    systemctl restart fr24feed
+  fi
+}
+
+write_config() {
+  # Check if config file already exists
+  if [ -f $config_file ]; then
+    echo "Config file already exists, not overwriting"
+    return
+  fi
+
+  if [ -f /etc/default/adsbexchange ]; then
+    echo "Loading latitude, longitude and altitude from ADSBx config"
+    source /etc/default/adsbexchange
+  elif [ -f /boot/adsb-config.txt ]; then
+    echo "Loading latitude, longitude and altitude from ADSBx config"
+    source /boot/adsb-config.txt
+  fi
+
+  get_data_source
+
+  tee $config_file >/dev/null <<EOF
+# To re-configure your position and altitude, head over to
+# https://www.planespotters.net/feed/configure
+
+INPUT_TYPE="$config_input_type"
+INPUT="$config_input"
+
+LATITUDE=$LATITUDE
+LONGITUDE=$LONGITUDE
+ALTITUDE=$ALTITUDE
+
+MLAT=yes
+
+# this is the source for 978 data, use port 30978 from dump978 --raw-port
+# if you're not receiving 978, don't worry about it, not doing any harm!
+UAT_INPUT="127.0.0.1:30978"
+
+EOF
+}
+
+finish_initialisation() {
+  ## INIT COMPLETE
+
+  uuid=$(cat "$uuid_file")
+
+  endtext_config="
+---------------------
+To participate in MLAT data sharing, please set up your antenna location at this URL and run the generated config script:
+---------------------
+https://www.planespotters.net/feed/configure
+---------------------
+"
+
+  endtext_success="
+Feeder script successfully initialised.
+
+Thank you for sharing your data with Planespotters.net!
+
+See your status at:
+
+https://www.planespotters.net/feed/status/$uuid
+"
+
+  input_ip=$(echo $config_input | cut -d: -f1)
+  input_port=$(echo $config_input | cut -d: -f2)
+
+  endtext_error="
+---------------------
+No data available from IP $input_ip on port $input_port!
+---------------------
+If your data source is another device / receiver, see the advice here:
+https://github.com/adsbexchange/wiki/wiki/Datasource-other-device
+"
+
+  if ! timeout 5 nc -z "$input_ip" "$input_port" && command -v nc &>/dev/null; then
+    echo -e "$endtext_error"
+  else
+    # Display the thank you message box.
+    echo -e "$endtext_success"
+
+    source "$config_file"
+    if [[ -z "$LATITUDE" ]] || [[ -z "$LONGITUDE" ]] || [[ -z "$ALTITUDE" ]]; then
+      echo -e "$endtext_config"
+    fi
+  fi
+}
+
+check_data_source
+setup_uuid
+write_config
+finish_initialisation

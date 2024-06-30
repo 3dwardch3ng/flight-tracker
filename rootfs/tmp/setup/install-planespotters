@@ -1,0 +1,320 @@
+version=1.0.6
+echo "Install script version $version"
+
+trap 'echo "------------"; echo "[ERROR] Error in line $LINENO when executing: $BASH_COMMAND"' ERR
+renice 10 $$ &>/dev/null
+
+debug=false
+
+for param in "$@"
+do
+  case "$param" in
+  debug)
+    debug=true
+  ;;
+  esac
+done
+
+if [ "$(id -u)" != "0" ]; then
+  echo -e "\033[33m"
+  echo "This script must be run using sudo or as root."
+  echo -e "\033[37m"
+  exit 1
+fi
+
+if [ ! -f /etc/debian_version ]; then
+  echo "This script is only intended for Debian-like systems (Debian, Ubuntu, Raspbian etc.)"
+  exit 1
+fi
+
+# Check if a reboot is pending due to kernel updates
+if [ -f /var/run/reboot-required ] || [ -f /run/reboot-required ]; then
+  echo "A reboot is required. Please reboot and run this script again"
+  exit 1
+fi
+
+username="planespotters"
+home_dir="/usr/local/share/planespotters"
+run_dir="/run/planespotters"
+uuid_file="/etc/planespotters/uuid"
+config_file="/etc/planespotters/feedclient"
+logfile="$home_dir/lastlog"
+
+# Prefix services to avoid conflicts
+servicename_feed="planespotters-feed"
+servicename_mlat_client="planespotters-mlat-client"
+
+binary_feed="$home_dir/feed-planespotters"
+binary_mlat_client="$home_dir/venv/bin/mlat-client"
+
+create_directories_and_files() {
+  config_dir=$(dirname $config_file)
+  mkdir -p "$config_dir"
+  mkdir -p "$home_dir"
+  mkdir -p "$run_dir"
+
+  chown -R "$username" "$home_dir"
+  chown -R "$username" "$run_dir"
+
+  rm -f $logfile
+  touch $logfile
+}
+
+get_architecture() {
+  arch=$(uname -m)
+
+  echo "$arch"
+}
+
+
+
+write_feed_script() {
+  filename="${home_dir}/planespotters-feed"
+  tee "$filename" >/dev/null <<EOF
+#!/bin/bash
+
+uuid=\$(cat "$uuid_file")
+
+if [[ ! \$uuid =~ ^\{?[A-F0-9a-f]{8}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-[A-F0-9a-f]{12}\}?$ ]] || [[ \$uuid =~ ^\{?[A-F0-9a-f]{8}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-0000-000000000000\}?$ ]]; then
+    echo UUID not valid
+    sleep 3600
+    exit
+fi
+
+source "$config_file"
+
+if ! [[ -d "$run_dir" ]]; then
+    mkdir -p "$run_dir"
+fi
+
+if [[ -z \$INPUT ]]; then
+    INPUT="127.0.0.1:30005"
+fi
+
+INPUT_IP=\$(echo \$INPUT | cut -d: -f1)
+INPUT_PORT=\$(echo \$INPUT | cut -d: -f2)
+SOURCE="--net-connector \$INPUT_IP,\$INPUT_PORT,beast_in,silent_fail"
+
+if [[ -z \$UAT_INPUT ]]; then
+    UAT_INPUT="127.0.0.1:30978"
+fi
+
+UAT_IP=\$(echo \$UAT_INPUT | cut -d: -f1)
+UAT_PORT=\$(echo \$UAT_INPUT | cut -d: -f2)
+UAT_SOURCE="--net-connector \$UAT_IP,\$UAT_PORT,uat_in,silent_fail"
+
+exec "$binary_feed" --net --net-only --quiet \\
+    --write-json "$run_dir" \\
+    --net-beast-reduce-interval 0.5 \\
+    --net-connector feed.planespotters.net,30004,beast_reduce_plus_out \\
+    --net-heartbeat 60 --net-ro-size 1280 --net-ro-interval 0.2 --net-ro-port 0 --net-sbs-port 0 --net-bi-port 0 --net-bo-port 0 --net-ri-port 0 \\
+    --uuid-file="$uuid_file" --max-range 450 --json-location-accuracy 2 \\
+    \$UAT_SOURCE \\
+    \$SOURCE
+
+EOF
+
+  chmod +x "$filename"
+
+  service_filename="/lib/systemd/system/$servicename_feed.service"
+  #touch "$service_filename"
+  tee "$service_filename" >/dev/null <<EOF
+[Unit]
+Description=Planespotters.net Radar Feed
+Wants=network.target
+After=network.target
+
+[Service]
+User=$username
+RuntimeDirectory=$servicename_feed
+ExecStart=$filename
+Type=simple
+Restart=always
+RestartSec=30
+StartLimitInterval=1
+StartLimitBurst=100
+SyslogIdentifier=$servicename_feed
+Nice=-1
+
+[Install]
+WantedBy=default.target
+
+EOF
+}
+
+write_mlat_script() {
+  filename="${home_dir}/mlat_client_start"
+  tee "$filename" >/dev/null <<EOF
+#!/bin/bash
+
+source "$config_file"
+uuid=\$(cat "$uuid_file")
+
+if [[ ! \$uuid =~ ^\{?[A-F0-9a-f]{8}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-[A-F0-9a-f]{12}\}?$ ]] || [[ \$uuid =~ ^\{?[A-F0-9a-f]{8}-[A-F0-9a-f]{4}-[A-F0-9a-f]{4}-0000-000000000000\}?$ ]]; then
+    echo UUID not valid
+    sleep 3600
+    exit
+fi
+
+if ! [[ -d "$run_dir" ]]; then
+    mkdir -p "$run_dir"
+fi
+
+if [[ -z "\$MLAT" ]]; then
+    MLAT="yes"
+fi
+
+if [[ -z "\$LATITUDE" ]] || [[ -z "\$LONGITUDE" ]] || [[ -z "\$MLAT" ]] || [[ "\$MLAT" == "no" ]]; then
+    echo MLAT DISABLED
+    sleep 3600
+    exit
+fi
+
+if [[ -z \$INPUT ]]; then
+    INPUT="127.0.0.1:30005"
+fi
+
+INPUT_IP=\$(echo \$INPUT | cut -d: -f1)
+INPUT_PORT=\$(echo \$INPUT | cut -d: -f2)
+
+sleep 2
+
+while ! nc -z "\$INPUT_IP" "\$INPUT_PORT" && command -v nc &>/dev/null; do
+    echo "Could not connect to \$INPUT_IP:\$INPUT_PORT, retry in 60 seconds."
+    sleep 60
+done
+
+exec "$binary_mlat_client" \\
+    --input-type "\$INPUT_TYPE" --no-udp \\
+    --input-connect "\$INPUT" \
+    --server mlat.planespotters.net:31090 \\
+    --lat "\$LATITUDE" \\
+    --lon "\$LONGITUDE" \\
+    --alt "\$ALTITUDE" \\
+    --user "\$uuid" \\
+    --uuid-file "$uuid_file"
+
+EOF
+
+  chmod +x "$filename"
+
+  service_filename="/lib/systemd/system/$servicename_mlat_client.service"
+  #touch "$service_filename"
+  tee "$service_filename" >/dev/null <<EOF
+[Unit]
+Description=Planespotters.net MLAT Client
+Wants=network.target
+After=network.target
+
+[Service]
+User=$username
+RuntimeDirectory=$servicename_mlat_client
+ExecStart=$filename
+Type=simple
+Restart=always
+RestartSec=30
+StartLimitInterval=1
+StartLimitBurst=100
+SyslogIdentifier=$servicename_mlat_client
+Nice=-1
+
+[Install]
+WantedBy=default.target
+
+EOF
+}
+
+create_user() {
+  if ! id -u "$username" &>/dev/null; then
+    # 2nd syntax is for fedora / centos
+    adduser --system --home "$home_dir" --no-create-home --quiet "$username" || adduser --system --home-dir "$home_dir" --no-create-home "$username"
+  fi
+}
+
+get_git_revision() {
+  git rev-parse HEAD 2>/dev/null || echo "$RANDOM-$RANDOM"
+}
+
+install_mlat_client() {
+  venv_dir="$home_dir/venv"
+
+  cd $home_dir
+
+  mlat_dir_git="$home_dir/mlat-client-git"
+  # Clean git dir in case it was left over from last run
+  rm -rf "$mlat_dir_git"
+
+  echo
+  echo "Compiling / installing MLAT client."
+  echo
+
+  git clone --depth 1 --single-branch --branch "$mlat_branch" "$mlat_repo" "$mlat_dir_git" &>> $logfile
+
+  cd "$mlat_dir_git"
+
+  rm "$venv_dir-backup" -rf
+  mv "$venv_dir" "$venv_dir-backup" -f &>/dev/null || true
+  if /usr/bin/python3 -m venv $venv_dir >> $logfile \
+      && source "$venv_dir/bin/activate" >> $logfile \
+      && python3 setup.py build >> $logfile \
+      && python3 setup.py install >> $logfile \
+      && get_git_revision > "$home_dir/mlat_version" || rm -f "$home_dir/mlat_version" \
+  ; then
+      rm "$venv_dir-backup" -rf
+  else
+      rm "$venv_dir" -rf
+      mv "$venv_dir-backup" "$venv_dir" &>/dev/null || true
+      echo "Installing mlat-client failed, if there was an old version it has been restored."
+      echo "Continuing with feed client."
+  fi
+
+  rm -rf "$mlat_dir_git"
+}
+
+install_readsb() {
+  cd $home_dir
+
+  readsb_dir_git="$home_dir/readsb-git"
+  rm -rf "$readsb_dir_git"
+
+  echo
+  echo "Compiling / installing the feed client (readsb)."
+  echo
+
+  cp -r /tmp/setup/planespotters-readsb/. $readsb_dir_git >> $logfile
+
+  cd "$readsb_dir_git"
+
+  make clean >> $logfile
+  make -j2 AIRCRAFT_HASH_BITS=12 >> $logfile
+  rm -f "$binary_feed"
+  cp readsb "$binary_feed"
+  get_git_revision > $home_dir/readsb_version || rm -f $home_dir/readsb_version
+
+  rm -rf "$readsb_dir_git"
+}
+
+finish_installation() {
+  ## INSTALLATION COMPLETE
+
+  endtext_success="
+Feeder script successfully installed.
+"
+
+  echo -e "$endtext_success"
+}
+
+create_user
+create_directories_and_files
+install_readsb
+write_feed_script
+install_mlat_client
+write_mlat_script
+finish_installation
+
+if [ "$debug" == "true" ]; then
+    echo "Debug output:"
+
+    cat $logfile
+fi
+
