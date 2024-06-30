@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS builder
+FROM debian:bookworm-slim
 
 SHELL ["/bin/bash", "-c"]
 
@@ -105,8 +105,6 @@ RUN rm -rf /var/lib/apt/lists/*
 
 EXPOSE 80 8504 8754 8080 30001 30002 30003 30004 30005 30053 30054 30104 30105 30106 30154 30334 32004 32008 32088 32457 32458 32459
 
-ENTRYPOINT [ "/opt/flight-tracker/entrypoint.sh" ]
+COPY entrypoint.sh /root/entrypoint.sh
 
-FROM builder AS runner
-
-USER 1000
+ENTRYPOINT [ "/root/entrypoint.sh" ]
