@@ -103,7 +103,7 @@ WORKDIR /tmp
 RUN apt autoremove -y && apt clean || echo OK
 RUN rm -rf /var/lib/apt/lists/*
 
-EXPOSE 5432
+EXPOSE 80 8504 8754 8080 30001 30002 30003 30004 30005 30053 30054 30104 30105 30106 30154 30334 32004 32008 32088 32457 32458 32459
 
 ENTRYPOINT [ "/opt/flight-tracker/entrypoint.sh" ]
 
