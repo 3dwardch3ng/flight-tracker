@@ -5,7 +5,7 @@ on:
     branches:
       - main
     tags:
-      - "v0.0.1"
+      - "v*"
 
 env:
   REGISTRY_IMAGE: edeedeeed/flight-tracker
@@ -79,9 +79,8 @@ jobs:
           images: ${{ env.REGISTRY_IMAGE }}
           # generate Docker tags based on the following events/attributes
           tags: |
-            type=schedule
+            type=schedule,{{date 'YYYYMMDD'}}
             type=ref,event=branch
-            type=ref,event=pr
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
