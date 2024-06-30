@@ -1,6 +1,3 @@
-#!/bin/bash
-set -e
-
 IPATH=/usr/local/share/adsbexchange
 GIT="$IPATH/git"
 

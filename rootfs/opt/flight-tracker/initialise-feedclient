@@ -1,8 +1,3 @@
-#!/bin/bash
-set -e
-trap 'echo "[ERROR] Error in line $LINENO when executing: $BASH_COMMAND"' ERR
-renice 10 $$ &>/dev/null
-
 ADSBEXCHANGEUSERNAME=$1
 RECEIVERLATITUDE=$2
 RECEIVERLONGITUDE=$3

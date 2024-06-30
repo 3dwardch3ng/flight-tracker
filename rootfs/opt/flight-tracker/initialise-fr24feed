@@ -1,6 +1,3 @@
-#!/bin/bash
-set -e
-
 fr24feed --signup
 chmod a+rw /etc/fr24feed.ini
 

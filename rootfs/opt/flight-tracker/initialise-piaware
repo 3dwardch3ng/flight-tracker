@@ -1,0 +1,7 @@
+piaware-config allow-auto-updates yes
+piaware-config allow-manual-updates yes
+piaware-config feeder-id $1
+piaware-config receiver-host $2
+piaware-config receiver-port $3
+piaware-config allow-mlat $4
+piaware-config mlat-results $5

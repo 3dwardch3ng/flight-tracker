@@ -1,6 +1,3 @@
-#!/bin/bash
-set -e
-
 # Prepare files
 curl -L -o flightaware-apt-repository_1.2_all.deb \
     https://www.flightaware.com/adsb/piaware/files/packages/pool/piaware/f/flightaware-apt-repository/flightaware-apt-repository_1.2_all.deb
@@ -15,3 +12,5 @@ git clone --depth 1 --single-branch --branch master https://github.com/adsbexcha
 git clone --depth 1 --single-branch --branch master https://github.com/mutability/mlat-client.git
 git clone --depth 1 --single-branch --branch master https://github.com/adsbexchange/readsb.git
 git clone --depth 1 --single-branch --branch master https://github.com/rtlsdrblog/rtl-sdr-blog.git
+git clone --depth 1 --single-branch --branch master https://github.com/planespotters/mlat-client.git /tmp/setup/planespotters-mlat
+git clone --depth 1 --single-branch --branch dev https://github.com/wiedehopf/readsb.git /tmp/setup/planespotters-readsb
